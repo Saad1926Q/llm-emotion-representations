@@ -72,5 +72,5 @@ python scripts/extract_activations.py --run-dir data/runs/pilot --limit 2
 ```
 
 Each run stores its manifest and generated records as JSONL. Extracted
-activation tensors are saved under `activations/`, with their metadata in
-`activation_index.jsonl`.
+activation tensors are saved under `activations/`. Re-running extraction
+overwrites the existing tensor files.

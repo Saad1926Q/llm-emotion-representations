@@ -8,7 +8,6 @@ from typing import Any
 from emotion_vectors import MODEL_ID, THINKING_ENABLED, build_manifest
 from emotion_vectors.generation import (
     generate_sample,
-    generation_metadata,
     load_model_and_tokenizer,
 )
 
@@ -107,7 +106,6 @@ def main() -> None:
         torch_dtype=args.torch_dtype,
         device_map=args.device_map,
     )
-    revisions = generation_metadata(model, tokenizer)
 
     with generation_path.open("a", encoding="utf-8") as handle:
         for index, row in enumerate(pending, start=1):
@@ -116,8 +114,6 @@ def main() -> None:
                 tokenizer,
                 row,
                 model_id=args.model_id,
-                model_revision=revisions["model_revision"],
-                tokenizer_revision=revisions["tokenizer_revision"],
                 thinking_enabled=args.thinking,
             )
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")

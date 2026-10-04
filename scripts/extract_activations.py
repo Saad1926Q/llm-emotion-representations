@@ -17,10 +17,6 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def _indexed_sample_ids(path: Path) -> set[str]:
-    if not path.exists():
-        return set()
-    return {row["sample_id"] for row in _read_jsonl(path)}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -73,29 +69,23 @@ def main() -> None:
     if args.limit is not None:
         records = records[: args.limit]
 
+    records = [
+        record
+        for record in records
+        if record.get("validation", {}).get("valid", True)
+    ]
+    if not records:
+        print("no valid records to extract")
+        return
+
     model_id = args.model_id or records[0].get("model_id") or MODEL_ID
     activations_dir = args.run_dir / "activations"
     activations_dir.mkdir(parents=True, exist_ok=True)
-    index_path = args.run_dir / "activation_index.jsonl"
-    indexed = _indexed_sample_ids(index_path)
 
-    pending = [
-        record
-        for record in records
-        if record["sample_id"] not in indexed
-        and record.get("validation", {}).get("valid", True)
-    ]
-    skipped = sum(
-        record.get("validation", {}).get("valid", True) is False
-        for record in records
-    )
-
-    if not pending:
-        print(
-            f"nothing to extract; {len(records) - skipped} valid records are complete "
-            f"({skipped} invalid records skipped)"
-        )
-        return
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("Install torch before extracting activations.") from exc
 
     model, _ = load_model_and_tokenizer(
         model_id,
@@ -103,37 +93,17 @@ def main() -> None:
         device_map=args.device_map,
     )
 
-    try:
-        import torch
-    except ImportError as exc:
-        raise RuntimeError("Install torch before extracting activations.") from exc
+    for index, record in enumerate(records, start=1):
+        activations = extract_activations(model, record)
+        tensor_name = f"{record['sample_id'].replace('/', '_')}.pt"
+        tensor_path = activations_dir / tensor_name
+        torch.save(activations, tensor_path)
+        print(
+            f"extracted {index}/{len(records)}: "
+            f"{record['sample_id']} shape={tuple(activations.shape)}"
+        )
 
-    with index_path.open("a", encoding="utf-8") as handle:
-        for index, record in enumerate(pending, start=1):
-            activations = extract_activations(model, record)
-            tensor_name = f"{record['sample_id'].replace('/', '_')}.pt"
-            tensor_path = activations_dir / tensor_name
-            torch.save(activations, tensor_path)
-
-            index_row = {
-                "sample_id": record["sample_id"],
-                "pair_id": record["pair_id"],
-                "condition": record["condition"],
-                "emotion": record["emotion"],
-                "topic": record["topic"],
-                "template_id": record["template_id"],
-                "path": str(tensor_path.relative_to(args.run_dir)),
-                "shape": list(activations.shape),
-                "dtype": str(activations.dtype),
-            }
-            handle.write(json.dumps(index_row, ensure_ascii=False) + "\n")
-            handle.flush()
-            print(
-                f"extracted {index}/{len(pending)}: "
-                f"{record['sample_id']} shape={tuple(activations.shape)}"
-            )
-
-    print(f"saved activation index to {index_path}; skipped {skipped} invalid records")
+    print(f"saved activations to {activations_dir}")
 
 
 if __name__ == "__main__":

@@ -116,8 +116,6 @@ def generate_sample(
     row: dict,
     *,
     model_id: str = MODEL_ID,
-    model_revision: str | None = None,
-    tokenizer_revision: str | None = None,
     thinking_enabled: bool = THINKING_ENABLED,
 ) -> dict:
     """Generate one row and save the token boundaries needed for extraction."""
@@ -170,16 +168,7 @@ def generate_sample(
         "response_end": response_end,
         "generation_parameters": dict(GENERATION_KWARGS),
         "model_id": model_id,
-        "model_revision": model_revision,
-        "tokenizer_revision": tokenizer_revision,
         "thinking_enabled": thinking_enabled,
     }
     record["validation"] = validate_generation(record)
     return record
-
-
-def generation_metadata(model, tokenizer) -> dict[str, str | None]:
-    return {
-        "model_revision": getattr(model.config, "_commit_hash", None),
-        "tokenizer_revision": getattr(tokenizer, "revision", None),
-    }
