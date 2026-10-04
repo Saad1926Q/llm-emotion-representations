@@ -1,7 +1,18 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "llm-emotion-representations"
 version = "0.1.0"
-description = "Add your description here"
+description = "Generation-based emotion representation experiments for language models"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "torch>=2.6.0",
+    "transformers>=5.0.0",
+    "safetensors>=0.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

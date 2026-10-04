@@ -30,3 +30,26 @@ The immediate goals are to:
 - compare baseline and emotion-steered outputs on identical prompts;
 - test several steering strengths;
 - evaluate emotional change alongside output quality;
+
+## Approach
+
+The first experiment uses `Qwen/Qwen3.5-2B` and a generation-based method.
+The model generates short stories for ten target emotions and matched neutral
+stories. Prompts use five templates and twenty topics, with seed `42`.
+
+The extraction runs in two passes:
+
+1. Generate each story and save the exact prompt and token IDs.
+2. Replay the saved prompt and response with
+   `output_hidden_states=True` and `use_cache=False`.
+
+For each layer, we keep only the response-token hidden states and average them
+into one activation for that story. Emotion vectors are computed by subtracting
+matched neutral activations from emotional activations, averaging across story
+pairs, and normalizing the result.
+
+The current manifest contains:
+
+- 1,000 emotional stories;
+- 100 neutral stories;
+- 1,100 total generations.
