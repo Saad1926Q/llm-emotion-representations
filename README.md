@@ -53,3 +53,24 @@ The current manifest contains:
 - 1,000 emotional stories;
 - 100 neutral stories;
 - 1,100 total generations.
+
+### Running the scripts
+
+Install the project, then run generation and extraction as separate steps:
+
+```bash
+python -m pip install -e .
+python scripts/generate_dataset.py
+python scripts/extract_activations.py
+```
+
+For a small pilot run:
+
+```bash
+python scripts/generate_dataset.py --run-dir data/runs/pilot --limit 2
+python scripts/extract_activations.py --run-dir data/runs/pilot --limit 2
+```
+
+Each run stores its manifest and generated records as JSONL. Extracted
+activation tensors are saved under `activations/`, with their metadata in
+`activation_index.jsonl`.
