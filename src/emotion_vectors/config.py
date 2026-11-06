@@ -49,7 +49,6 @@ GENERATION_KWARGS = {
     "top_p": 1.0,
     "top_k": 20,
     "min_p": 0.0,
-    "presence_penalty": 2.0,
     "repetition_penalty": 1.0,
     "max_new_tokens": 256,
 }
