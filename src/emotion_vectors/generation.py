@@ -26,7 +26,7 @@ def load_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=getattr(torch, torch_dtype),
+        dtype=getattr(torch, torch_dtype),
         device_map=device_map,
     )
     model.eval()

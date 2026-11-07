@@ -9,6 +9,7 @@ description = "Generation-based emotion representation experiments for language 
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.12.0",
     "safetensors>=0.8.0",
     "huggingface-hub>=1.7.0",
     "torch>=2.11.0",
