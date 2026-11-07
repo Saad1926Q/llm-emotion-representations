@@ -33,17 +33,30 @@ def load_model_and_tokenizer(
     return model, tokenizer
 
 
+def render_messages_prompt(
+    tokenizer,
+    messages: list[dict[str, str]],
+    *,
+    thinking_enabled: bool = THINKING_ENABLED,
+) -> str:
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        chat_template_kwargs={"enable_thinking": thinking_enabled},
+    )
+
+
 def render_chat_prompt(
     tokenizer,
     prompt: str,
     *,
     thinking_enabled: bool = THINKING_ENABLED,
 ) -> str:
-    return tokenizer.apply_chat_template(
+    return render_messages_prompt(
+        tokenizer,
         [{"role": "user", "content": prompt}],
-        tokenize=False,
-        add_generation_prompt=True,
-        chat_template_kwargs={"enable_thinking": thinking_enabled},
+        thinking_enabled=thinking_enabled,
     )
 
 
@@ -109,6 +122,68 @@ def validate_generation(
         "warnings": warnings,
     }
 
+def generate_chat_turn(
+    model,
+    tokenizer,
+    messages: list[dict[str, str]],
+    row: dict,
+    *,
+    seed: int,
+    model_id: str = MODEL_ID,
+    thinking_enabled: bool = THINKING_ENABLED,
+) -> dict:
+    """Generate one assistant turn and retain exact replay token boundaries."""
+    import torch
+
+    rendered_prompt = render_messages_prompt(
+        tokenizer,
+        messages,
+        thinking_enabled=thinking_enabled,
+    )
+    encoded = tokenizer(
+        rendered_prompt,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
+    input_device = _input_device(model)
+    encoded = {name: value.to(input_device) for name, value in encoded.items()}
+
+    _set_seed(seed)
+    with torch.inference_mode():
+        generated = model.generate(**encoded, **_generation_kwargs(tokenizer))
+
+    full_ids = generated[0].detach().cpu()
+    prompt_ids = encoded["input_ids"][0].detach().cpu().tolist()
+    response_start = len(prompt_ids)
+    response_end = len(full_ids)
+    if (
+        tokenizer.eos_token_id is not None
+        and response_end > response_start
+        and int(full_ids[-1]) == tokenizer.eos_token_id
+    ):
+        response_end -= 1
+
+    response_ids = full_ids[response_start:response_end].tolist()
+    record = {
+        **row,
+        "seed": seed,
+        "messages": messages,
+        "rendered_prompt": rendered_prompt,
+        "response": tokenizer.decode(
+            response_ids,
+            skip_special_tokens=True,
+        ).strip(),
+        "prompt_ids": prompt_ids,
+        "response_ids": response_ids,
+        "full_ids": full_ids.tolist(),
+        "response_start": response_start,
+        "response_end": response_end,
+        "generation_parameters": dict(GENERATION_KWARGS),
+        "model_id": model_id,
+        "thinking_enabled": thinking_enabled,
+    }
+    record["validation"] = validate_generation(record)
+    return record
 
 def generate_sample(
     model,
