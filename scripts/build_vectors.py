@@ -75,13 +75,13 @@ def build_artifacts(run_dir: Path, output_dir: Path, layer: int) -> dict[str, An
 
     tensors: dict[str, torch.Tensor] = {
         "neutral_mean/all_layers": neutral_mean.contiguous(),
-        f"neutral_mean/layer_{layer}": neutral_mean[layer].contiguous(),
+        f"neutral_mean/layer_{layer}": neutral_mean[layer].clone(),
     }
     for emotion in TARGET_EMOTIONS:
         tensors[f"raw/{emotion}/all_layers"] = raw[emotion].contiguous()
         tensors[f"unit/{emotion}/all_layers"] = unit[emotion].contiguous()
-        tensors[f"raw/{emotion}/layer_{layer}"] = raw[emotion][layer].contiguous()
-        tensors[f"unit/{emotion}/layer_{layer}"] = unit[emotion][layer].contiguous()
+        tensors[f"raw/{emotion}/layer_{layer}"] = raw[emotion][layer].clone()
+        tensors[f"unit/{emotion}/layer_{layer}"] = unit[emotion][layer].clone()
 
     output_dir.mkdir(parents=True, exist_ok=True)
     tensor_path = output_dir / "emotion_vectors.safetensors"

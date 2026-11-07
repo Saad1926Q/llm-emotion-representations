@@ -59,7 +59,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--torch-dtype",
         choices=("bfloat16", "float16", "float32"),
-        default="bfloat16",
+        default="float32",
     )
     parser.add_argument("--device-map", default="auto")
     parser.add_argument("--conversations-per-emotion", type=int, default=20)

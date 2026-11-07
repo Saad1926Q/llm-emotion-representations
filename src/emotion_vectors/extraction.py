@@ -13,8 +13,7 @@ def _input_device(model):
         return next(model.parameters()).device
 
 
-def extract_activations(model, sample: dict):
-    """Return one pooled response activation per decoder layer."""
+def _response_hidden_states(model, sample: dict):
     import torch
 
     input_ids = torch.tensor(
@@ -37,13 +36,33 @@ def extract_activations(model, sample: dict):
         raise RuntimeError(
             "The model did not return embedding and decoder-layer hidden states."
         )
+    return outputs.hidden_states[1:]
 
+
+def extract_layer_activation(model, sample: dict, layer: int):
+    """Return the pooled response activation for one zero-indexed decoder layer."""
+    hidden_states = _response_hidden_states(model, sample)
+    if not 0 <= layer < len(hidden_states):
+        raise ValueError(
+            f"layer must be in [0, {len(hidden_states) - 1}], received {layer}"
+        )
+    response_states = hidden_states[layer][
+        0, sample["response_start"] : sample["response_end"]
+    ]
+    return pool_response_states(response_states).float().cpu()
+
+
+def extract_activations(model, sample: dict):
+    """Return one pooled response activation per decoder layer."""
+    import torch
+
+    hidden_states = _response_hidden_states(model, sample)
     response_start = sample["response_start"]
     response_end = sample["response_end"]
-    activations = []
-
-    for layer_states in outputs.hidden_states[1:]:
-        response_states = layer_states[0, response_start:response_end]
-        activations.append(pool_response_states(response_states).float().cpu())
-
+    activations = [
+        pool_response_states(layer_states[0, response_start:response_end])
+        .float()
+        .cpu()
+        for layer_states in hidden_states
+    ]
     return torch.stack(activations)
