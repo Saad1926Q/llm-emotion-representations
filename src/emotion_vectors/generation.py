@@ -23,6 +23,9 @@ def load_model_and_tokenizer(
             "Install torch and transformers before loading the model."
         ) from exc
 
+    if device_map == "auto" and torch.backends.mps.is_available():
+        device_map = "mps"
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,

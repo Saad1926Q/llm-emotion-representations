@@ -1,2 +1,4 @@
 larp/
 data/
+__pycache__/
+.venv/
