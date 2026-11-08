@@ -123,7 +123,8 @@ def main() -> None:
                 output.write(json.dumps(result, ensure_ascii=False) + "\n")
                 completed.add(row["response_id"])
             output.flush()
-            print(f"judged {len(completed)}/{len(requests)} responses")
+            done = sum(row["response_id"] in completed for row in requests)
+            print(f"judged {done}/{len(requests)} responses")
 
     print(f"saved external ratings to {output_path}")
 
