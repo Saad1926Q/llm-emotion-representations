@@ -154,7 +154,7 @@ def run_claude(
         value = value["ratings"]
     metadata = {
         "session_id": session_id,
-        "cost_usd": float(final.get("total_cost_usd") or 0),
+        "cost_usd": float(final.get("total_cost_usd") or 0) / len(requests),
     }
     ids = [row["response_id"] for row in requests]
     return validate(value, ids), transcript, metadata
