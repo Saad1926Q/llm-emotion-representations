@@ -80,17 +80,19 @@ overwrites the existing tensor files.
 Dataset B contains 20 five-turn conversations for each of the ten target
 emotions. Every base conversation is generated under natural and suppression
 instructions, giving 200 base conversations and 2,000 assistant responses.
-The two conditions use identical user turns and paired per-turn seeds.
+The two conditions use identical user turns and matched RNG seeds.
 
 Rebuild and freeze the Dataset A vectors before generating Dataset B:
 
 ```bash
 uv run python scripts/generate_dataset.py \
   --run-dir data/runs/qwen35_2b_fp32 \
-  --torch-dtype float32
+  --torch-dtype float32 \
+  --batch-size 8
 uv run python scripts/extract_activations.py \
   --run-dir data/runs/qwen35_2b_fp32 \
-  --torch-dtype float32
+  --torch-dtype float32 \
+  --batch-size 4
 uv run python scripts/build_vectors.py \
   --run-dir data/runs/qwen35_2b_fp32
 ```
@@ -109,9 +111,10 @@ uv run python scripts/build_vectors.py \
 Generate Dataset B and calculate its raw internal projections:
 
 ```bash
-uv run python scripts/generate_dataset_b.py
+uv run python scripts/generate_dataset_b.py --batch-size 4
 uv run python scripts/score_internal_b.py \
-  --vector-dir data/runs/qwen35_2b_fp32/vectors
+  --vector-dir data/runs/qwen35_2b_fp32/vectors \
+  --batch-size 4
 ```
 
 Both scripts resume from their JSONL outputs. For a paired two-condition smoke
@@ -120,3 +123,9 @@ run, use `generate_dataset_b.py --limit-conversations 1`; then score it with
 and response, mean-pools only the current assistant response at frozen decoder
 layer 12, centers it using the frozen Dataset A neutral mean, and writes raw
 projections onto all ten unit vectors to `internal_scores.jsonl`.
+
+All four model-running scripts accept `--batch-size`; the default is `1`.
+Dataset B batches independent conversations only at the same turn. Natural and
+suppression batches retain identical conversation order and reset to the same
+batch seed. Use the largest value that fits GPU memory; later conversation turns
+are longer and may require a smaller batch than Dataset A.

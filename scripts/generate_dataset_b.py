@@ -8,7 +8,7 @@ from typing import Any
 
 from emotion_vectors import MODEL_ID, THINKING_ENABLED
 from emotion_vectors.conversations import build_dataset_b_manifest
-from emotion_vectors.generation import generate_chat_turn, load_model_and_tokenizer
+from emotion_vectors.generation import generate_chat_turns_batch, load_model_and_tokenizer
 
 DEFAULT_RUN_DIR = Path("data/runs/dataset_b")
 
@@ -69,6 +69,15 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Generate both conditions for only the first N base conversations.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help=(
+            "Independent conversations generated together at each turn "
+            "(default: 1)."
+        ),
+    )
     parser.add_argument("--thinking", action="store_true", default=THINKING_ENABLED)
     return parser
 
@@ -78,12 +87,14 @@ def main() -> None:
     manifest = build_dataset_b_manifest(
         conversations_per_emotion=args.conversations_per_emotion
     )
+    if args.batch_size < 1:
+        raise SystemExit("--batch-size must be at least 1")
     if args.limit_conversations is not None:
         if args.limit_conversations < 1:
             raise SystemExit("--limit-conversations must be at least 1")
-        selected_ids = list(dict.fromkeys(row["conversation_id"] for row in manifest))[
-            : args.limit_conversations
-        ]
+        selected_ids = list(
+            dict.fromkeys(row["conversation_id"] for row in manifest)
+        )[: args.limit_conversations]
         selected = set(selected_ids)
         selected_manifest = [
             row for row in manifest if row["conversation_id"] in selected
@@ -111,53 +122,79 @@ def main() -> None:
         device_map=args.device_map,
     )
     completed_now = 0
+    histories = {
+        run["run_id"]: [{"role": "system", "content": run["instruction"]}]
+        for run in selected_manifest
+    }
     with generation_path.open("a", encoding="utf-8") as handle:
-        for run in selected_manifest:
-            messages = [{"role": "system", "content": run["instruction"]}]
-            for turn, (user_text, seed) in enumerate(
-                zip(run["user_turns"], run["turn_seeds"], strict=True), start=1
-            ):
-                messages.append({"role": "user", "content": user_text})
-                sample_id = f"{run['run_id']}_t{turn}"
-                if sample_id in by_sample_id:
-                    response = by_sample_id[sample_id]["response"]
-                    messages.append({"role": "assistant", "content": response})
-                    continue
+        for turn in range(1, 6):
+            for run in selected_manifest:
+                histories[run["run_id"]].append(
+                    {"role": "user", "content": run["user_turns"][turn - 1]}
+                )
 
-                row = {
-                    "sample_id": sample_id,
-                    "run_id": run["run_id"],
-                    "conversation_id": run["conversation_id"],
-                    "emotion": run["emotion"],
-                    "condition": run["condition"],
-                    "scenario_index": run["scenario_index"],
-                    "subject": run["subject"],
-                    "turn": turn,
-                    "user_text": user_text,
-                }
-                record = generate_chat_turn(
-                    model,
-                    tokenizer,
-                    messages,
-                    row,
-                    seed=seed,
-                    model_id=args.model_id,
-                    thinking_enabled=args.thinking,
-                )
-                record["validation"]["warnings"].extend(
-                    _quality_warnings(record["response"], run["condition"])
-                )
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                handle.flush()
-                by_sample_id[sample_id] = record
-                messages.append(
-                    {"role": "assistant", "content": record["response"]}
-                )
-                completed_now += 1
-                print(
-                    f"generated {sample_id} "
-                    f"(valid={record['validation']['valid']})"
-                )
+            for condition in ("natural", "suppression"):
+                condition_runs = [
+                    run
+                    for run in selected_manifest
+                    if run["condition"] == condition
+                ]
+                for start in range(0, len(condition_runs), args.batch_size):
+                    selected_batch = condition_runs[start : start + args.batch_size]
+                    pending_runs = []
+                    rows = []
+                    for run in selected_batch:
+                        sample_id = f"{run['run_id']}_t{turn}"
+                        if sample_id in by_sample_id:
+                            histories[run["run_id"]].append(
+                                {
+                                    "role": "assistant",
+                                    "content": by_sample_id[sample_id]["response"],
+                                }
+                            )
+                            continue
+                        pending_runs.append(run)
+                        rows.append(
+                            {
+                                "sample_id": sample_id,
+                                "run_id": run["run_id"],
+                                "conversation_id": run["conversation_id"],
+                                "emotion": run["emotion"],
+                                "condition": run["condition"],
+                                "scenario_index": run["scenario_index"],
+                                "subject": run["subject"],
+                                "turn": turn,
+                                "user_text": run["user_turns"][turn - 1],
+                            }
+                        )
+                    if not pending_runs:
+                        continue
+
+                    batch_seed = selected_batch[0]["turn_seeds"][turn - 1]
+                    records = generate_chat_turns_batch(
+                        model,
+                        tokenizer,
+                        [histories[run["run_id"]] for run in pending_runs],
+                        rows,
+                        seed=batch_seed,
+                        model_id=args.model_id,
+                        thinking_enabled=args.thinking,
+                    )
+                    for run, record in zip(pending_runs, records, strict=True):
+                        record["validation"]["warnings"].extend(
+                            _quality_warnings(record["response"], condition)
+                        )
+                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        by_sample_id[record["sample_id"]] = record
+                        histories[run["run_id"]].append(
+                            {"role": "assistant", "content": record["response"]}
+                        )
+                        completed_now += 1
+                        print(
+                            f"generated {record['sample_id']} "
+                            f"(valid={record['validation']['valid']})"
+                        )
+                    handle.flush()
 
     print(f"generated {completed_now} responses; saved to {generation_path}")
 

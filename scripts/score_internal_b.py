@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from emotion_vectors import MODEL_ID
-from emotion_vectors.extraction import extract_layer_activation
+from emotion_vectors.extraction import extract_layer_activations_batch
 from emotion_vectors.generation import load_model_and_tokenizer
 from emotion_vectors.scoring import FrozenEmotionScorer
 
@@ -35,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device-map", default="auto")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Number of replay sequences per forward pass (default: 1).",
+    )
     return parser
 
 
@@ -42,6 +48,8 @@ def main() -> None:
     args = _parser().parse_args()
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1")
+    if args.batch_size < 1:
+        raise SystemExit("--batch-size must be at least 1")
 
     generations_path = args.run_dir / "generations.jsonl"
     if not generations_path.exists():
@@ -76,28 +84,34 @@ def main() -> None:
         torch_dtype=args.torch_dtype,
         device_map=args.device_map,
     )
+    scored = 0
     with output_path.open("a", encoding="utf-8") as handle:
-        for index, record in enumerate(pending, start=1):
-            activation = extract_layer_activation(model, record, scorer.layer)
-            projections = scorer.score(activation)
-            target_emotion = record["emotion"]
-            result = {
-                "sample_id": record["sample_id"],
-                "run_id": record["run_id"],
-                "conversation_id": record["conversation_id"],
-                "condition": record["condition"],
-                "emotion": target_emotion,
-                "turn": record["turn"],
-                "frozen_layer": scorer.layer,
-                "target_score": projections[target_emotion],
-                "projections": projections,
-            }
-            handle.write(json.dumps(result, ensure_ascii=False) + "\n")
-            handle.flush()
-            print(
-                f"scored {index}/{len(pending)}: {record['sample_id']} "
-                f"target={result['target_score']:.4f}"
+        for start in range(0, len(pending), args.batch_size):
+            batch = pending[start : start + args.batch_size]
+            activations = extract_layer_activations_batch(
+                model, batch, scorer.layer
             )
+            for record, activation in zip(batch, activations, strict=True):
+                projections = scorer.score(activation)
+                target_emotion = record["emotion"]
+                result = {
+                    "sample_id": record["sample_id"],
+                    "run_id": record["run_id"],
+                    "conversation_id": record["conversation_id"],
+                    "condition": record["condition"],
+                    "emotion": target_emotion,
+                    "turn": record["turn"],
+                    "frozen_layer": scorer.layer,
+                    "target_score": projections[target_emotion],
+                    "projections": projections,
+                }
+                handle.write(json.dumps(result, ensure_ascii=False) + "\n")
+                scored += 1
+                print(
+                    f"scored {scored}/{len(pending)}: {record['sample_id']} "
+                    f"target={result['target_score']:.4f}"
+                )
+            handle.flush()
 
     print(f"saved internal scores to {output_path}")
 

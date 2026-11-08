@@ -250,3 +250,142 @@ def generate_sample(
     }
     record["validation"] = validate_generation(record)
     return record
+
+
+def _generate_rendered_batch(
+    model,
+    tokenizer,
+    rendered_prompts: list[str],
+    rows: list[dict],
+    *,
+    seed: int,
+    model_id: str,
+    thinking_enabled: bool,
+) -> list[dict]:
+    """Generate a padded prompt batch using one reproducible batch RNG seed."""
+    import torch
+
+    if not rows or len(rows) != len(rendered_prompts):
+        raise ValueError("rows and rendered_prompts must have the same non-zero length")
+
+    previous_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    try:
+        encoded = tokenizer(
+            rendered_prompts,
+            return_tensors="pt",
+            padding=True,
+            add_special_tokens=False,
+        )
+    finally:
+        tokenizer.padding_side = previous_padding_side
+
+    input_device = _input_device(model)
+    encoded = {name: value.to(input_device) for name, value in encoded.items()}
+    _set_seed(seed)
+    with torch.inference_mode():
+        generated = model.generate(**encoded, **_generation_kwargs(tokenizer)).cpu()
+
+    padded_length = encoded["input_ids"].shape[1]
+    input_ids = encoded["input_ids"].cpu()
+    attention_mask = encoded["attention_mask"].cpu().bool()
+    stop_ids = {tokenizer.eos_token_id, tokenizer.pad_token_id} - {None}
+    records = []
+    for index, (row, rendered_prompt) in enumerate(
+        zip(rows, rendered_prompts, strict=True)
+    ):
+        prompt_ids = input_ids[index][attention_mask[index]].tolist()
+        generated_ids = generated[index, padded_length:].tolist()
+        stop = next(
+            (
+                position
+                for position, token_id in enumerate(generated_ids)
+                if token_id in stop_ids
+            ),
+            len(generated_ids),
+        )
+        response_ids = generated_ids[:stop]
+        full_ids = prompt_ids + response_ids
+        record = {
+            **row,
+            "seed": seed,
+            "batch_seed": seed,
+            "rendered_prompt": rendered_prompt,
+            "response": tokenizer.decode(
+                response_ids,
+                skip_special_tokens=True,
+            ).strip(),
+            "prompt_ids": prompt_ids,
+            "response_ids": response_ids,
+            "full_ids": full_ids,
+            "response_start": len(prompt_ids),
+            "response_end": len(full_ids),
+            "generation_parameters": dict(GENERATION_KWARGS),
+            "model_id": model_id,
+            "thinking_enabled": thinking_enabled,
+        }
+        record["validation"] = validate_generation(record)
+        records.append(record)
+    return records
+
+
+def generate_samples_batch(
+    model,
+    tokenizer,
+    rows: list[dict],
+    *,
+    seed: int,
+    model_id: str = MODEL_ID,
+    thinking_enabled: bool = THINKING_ENABLED,
+) -> list[dict]:
+    prompts = [
+        render_chat_prompt(
+            tokenizer,
+            row["prompt"],
+            thinking_enabled=thinking_enabled,
+        )
+        for row in rows
+    ]
+    return _generate_rendered_batch(
+        model,
+        tokenizer,
+        prompts,
+        rows,
+        seed=seed,
+        model_id=model_id,
+        thinking_enabled=thinking_enabled,
+    )
+
+
+def generate_chat_turns_batch(
+    model,
+    tokenizer,
+    messages_batch: list[list[dict[str, str]]],
+    rows: list[dict],
+    *,
+    seed: int,
+    model_id: str = MODEL_ID,
+    thinking_enabled: bool = THINKING_ENABLED,
+) -> list[dict]:
+    prompts = [
+        render_messages_prompt(
+            tokenizer,
+            messages,
+            thinking_enabled=thinking_enabled,
+        )
+        for messages in messages_batch
+    ]
+    records = _generate_rendered_batch(
+        model,
+        tokenizer,
+        prompts,
+        rows,
+        seed=seed,
+        model_id=model_id,
+        thinking_enabled=thinking_enabled,
+    )
+    for record, messages in zip(records, messages_batch, strict=True):
+        record["messages"] = list(messages)
+    return records

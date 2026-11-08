@@ -7,7 +7,7 @@ from typing import Any
 
 from emotion_vectors import MODEL_ID, THINKING_ENABLED, build_manifest
 from emotion_vectors.generation import (
-    generate_sample,
+    generate_samples_batch,
     load_model_and_tokenizer,
 )
 
@@ -75,6 +75,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Generate only the first N manifest rows; useful for a pilot run.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Number of prompts generated together (default: 1).",
+    )
+    parser.add_argument(
         "--thinking",
         action="store_true",
         default=THINKING_ENABLED,
@@ -87,6 +93,8 @@ def main() -> None:
     args = _parser().parse_args()
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1")
+    if args.batch_size < 1:
+        raise SystemExit("--batch-size must be at least 1")
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     manifest = build_manifest()
@@ -107,21 +115,32 @@ def main() -> None:
         device_map=args.device_map,
     )
 
+    completed_count = 0
     with generation_path.open("a", encoding="utf-8") as handle:
-        for index, row in enumerate(pending, start=1):
-            record = generate_sample(
+        for start in range(0, len(rows), args.batch_size):
+            selected_batch = rows[start : start + args.batch_size]
+            batch = [
+                row for row in selected_batch if row["sample_id"] not in completed
+            ]
+            if not batch:
+                continue
+            records = generate_samples_batch(
                 model,
                 tokenizer,
-                row,
+                batch,
+                seed=selected_batch[0]["seed"] + start,
                 model_id=args.model_id,
                 thinking_enabled=args.thinking,
             )
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                completed_count += 1
+                print(
+                    f"generated {completed_count}/{len(pending)}: "
+                    f"{record['sample_id']} "
+                    f"(valid={record['validation']['valid']})"
+                )
             handle.flush()
-            print(
-                f"generated {index}/{len(pending)}: "
-                f"{row['sample_id']} (valid={record['validation']['valid']})"
-            )
 
     print(f"saved generations to {generation_path}")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from emotion_vectors import MODEL_ID
-from emotion_vectors.extraction import extract_activations
+from emotion_vectors.extraction import extract_activations_batch
 from emotion_vectors.generation import load_model_and_tokenizer
 
 DEFAULT_RUN_DIR = Path("data/runs/qwen35_2b")
@@ -51,6 +51,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Extract only the first N generation records; useful for a pilot run.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Number of replay sequences per forward pass (default: 1).",
+    )
     return parser
 
 
@@ -58,6 +64,8 @@ def main() -> None:
     args = _parser().parse_args()
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1")
+    if args.batch_size < 1:
+        raise SystemExit("--batch-size must be at least 1")
 
     generations_path = args.run_dir / "generations.jsonl"
     if not generations_path.exists():
@@ -93,15 +101,19 @@ def main() -> None:
         device_map=args.device_map,
     )
 
-    for index, record in enumerate(records, start=1):
-        activations = extract_activations(model, record)
-        tensor_name = f"{record['sample_id'].replace('/', '_')}.pt"
-        tensor_path = activations_dir / tensor_name
-        torch.save(activations, tensor_path)
-        print(
-            f"extracted {index}/{len(records)}: "
-            f"{record['sample_id']} shape={tuple(activations.shape)}"
-        )
+    extracted = 0
+    for start in range(0, len(records), args.batch_size):
+        batch = records[start : start + args.batch_size]
+        batch_activations = extract_activations_batch(model, batch)
+        for record, activations in zip(batch, batch_activations, strict=True):
+            tensor_name = f"{record['sample_id'].replace('/', '_')}.pt"
+            tensor_path = activations_dir / tensor_name
+            torch.save(activations, tensor_path)
+            extracted += 1
+            print(
+                f"extracted {extracted}/{len(records)}: "
+                f"{record['sample_id']} shape={tuple(activations.shape)}"
+            )
 
     print(f"saved activations to {activations_dir}")
 
