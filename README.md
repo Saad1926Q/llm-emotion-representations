@@ -129,3 +129,34 @@ Dataset B batches independent conversations only at the same turn. Natural and
 suppression batches retain identical conversation order and reset to the same
 batch seed. Use the largest value that fits GPU memory; later conversation turns
 are longer and may require a smaller batch than Dataset A.
+
+## Blinded external judging with Claude Code
+
+Claude Code must already be logged in. The script deterministically shuffles
+responses, exposes only opaque IDs and response text to the judge, validates all
+ten 0–4 emotion ratings, retries malformed batches, and resumes from
+`external_scores.jsonl`.
+
+Run a 20-response pilot first:
+
+```bash
+uv run python scripts/score_external_b.py \
+  --model claude-haiku-5-5 \
+  --effort low \
+  --batch-size 20 \
+  --limit 20
+```
+
+Inspect the pilot, then score all 2,000 responses by removing `--limit`:
+
+```bash
+uv run python scripts/score_external_b.py \
+  --model claude-haiku-5-5 \
+  --effort low \
+  --batch-size 20
+```
+
+Blinded requests, the private ID map, and raw Claude transcripts are stored
+under `data/runs/dataset_b/judge/`. Claude runs in safe mode with permission
+prompts disabled and never receives condition, target-emotion, turn,
+conversation, or internal-score metadata.
