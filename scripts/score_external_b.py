@@ -107,9 +107,10 @@ def main() -> None:
                     time.sleep(2**attempt)
 
             batch_number = start // args.batch_size + 1
-            (transcript_dir / f"batch_{batch_number:04d}.jsonl").write_text(
-                transcript, encoding="utf-8"
+            transcript_path = transcript_dir / (
+                f"batch_{batch_number:04d}_{metadata['session_id']}.jsonl"
             )
+            transcript_path.write_text(transcript, encoding="utf-8")
             for row in ratings:
                 result = {
                     "sample_id": mapping[row["response_id"]],
